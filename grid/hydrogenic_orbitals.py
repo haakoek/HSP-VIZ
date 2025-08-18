@@ -1,5 +1,8 @@
 import numpy as np
+from matplotlib import pyplot as plt
+from scipy.interpolate import CubicSpline
 
+#REQUIREMENT: https://github.com/hyqD/grid-lib
 from grid_lib.pseudospectral_grids.gauss_legendre_lobatto import (
     GaussLegendreLobatto,
     Linear_map
@@ -7,8 +10,6 @@ from grid_lib.pseudospectral_grids.gauss_legendre_lobatto import (
 from grid_lib.spherical_coordinates.potentials import (
     Coulomb,
 )
-from matplotlib import pyplot as plt
-from scipy.interpolate import CubicSpline
 
 # Setup Legendre-Lobatto grid
 N = 120
