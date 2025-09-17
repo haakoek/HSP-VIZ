@@ -21,6 +21,7 @@ from grid_lib.spherical_coordinates.lasers import sine_square_laser, sine_laser
 from grid_lib.spherical_coordinates.utils import (
     Counter,
 )
+from grid_lib.spherical_coordinates.utils import mask_function
 
 ###########################################################################################################
 """
@@ -28,8 +29,8 @@ Setup radial grid, Hamiltonian, determine eigenstates and set initial state.
 """
 Z = 1.0
 r_min = 0
-r_max = 40
-N = int(1.5 * r_max)  # Number of grid points, should be large enough
+r_max = 80
+N = int(3.0 * r_max)  # Number of grid points, should be large enough
 
 GLL = GaussLegendreLobatto(N, Linear_map(r_min, r_max), symmetrize=False)
 D1 = GLL.D1
@@ -40,6 +41,14 @@ r_dot = GLL.r_dot[1:-1]
 w_r = GLL.weights[1:-1]
 w_r_rdot = w_r * r_dot
 n_r = len(r)
+
+# Setup mask function that absorbs the wavefunction at the grid boundary.
+mask_r = mask_function(r, r[-1], 0.8 * r[-1])
+
+plt.figure()
+plt.plot(r, mask_r)
+plt.axvline(0.8 * r_max, color="k", ls="--", label=r"$r_{mask}$")
+plt.show()
 
 l_max = 5
 n_l = l_max + 1
@@ -61,14 +70,12 @@ u0 = u0 / np.sqrt(norm_u0)
 psi_t = np.zeros((n_l, n_r), dtype=np.complex128)
 print(f"Size of the wavefunction array: {psi_t.nbytes/1e6:.2g} MB")
 psi_t[0] = np.complex128(u0)
-
 Pr_t0 = contract("Ia, Ia->a", psi_t.conj(), psi_t)
 #############################################################################################################
-
 # pulse inputs
-E0 = 0.0
-omega = 0.5
-n_cycles = 3
+E0 = 0.1
+omega = 2.0
+n_cycles = 12
 
 t_cycle = 2 * np.pi / omega
 e_field_z = sine_square_laser(
@@ -82,8 +89,8 @@ for l1 in range(0, n_l):
         Z_omega[l1, l2] = ame.l1m1_costh_l2m2(l1, 0, l2, 0)
 
 
-dt = 0.01
-tfinal = 10.0
+dt = 0.05
+tfinal = 40.0
 num_steps = int(tfinal / dt) + 1
 ###########################################################################################################
 """
@@ -174,6 +181,7 @@ for i in tqdm.tqdm(range(num_steps - 1)):
     # print(f"Converged after {local_counter.counter} iterations")
     nr_its_conv[i] = local_counter.counter
     psi_t = psi_t.reshape((n_l, n_r))
+    psi_t = contract("Ik, k->Ik", psi_t, mask_r)
 
     tmp_z = contract("IJ, Ja->Ia", Z_omega, psi_t)
     expec_z[i + 1] = contract(
@@ -206,7 +214,7 @@ print(f"Max(Im(Pr)): {np.max(Pr.imag):.3e}")
 int_Pr = contract("a, a->", w_r_rdot, Pr)
 print(f"Norm of the wavefunction: {int_Pr:.12f}")
 
-fig, axs = plt.subplots(2, 2, figsize=(10, 8))
+fig, axs = plt.subplots(3, 2, figsize=(14, 12))
 axs[0, 0].plot(
     time_points, e_field_z(time_points), color="red", label=r"$E(t)$"
 )
@@ -217,8 +225,9 @@ axs[0, 1].plot(time_points, expec_z.real, label=r"$\langle z(t) \rangle$")
 axs[0, 1].grid()
 axs[0, 1].legend()
 
-# axs[1, 0].semilogy(r, Pr_t0.real, label=r"$P(r,t=0)$")
-axs[1, 0].semilogy(r, Pr.real, label=r"$P(r,t=t_f)$")
+# axs[1, 0].plot(r, Pr_t0.real, label=r"$P(r,t=0)$")
+axs[1, 0].plot(r, Pr.real, label=r"$P(r,t=t_f)$")
+axs[1, 0].axvline(0.8 * r_max, color="k", ls="--", label=r"$r_{mask}$")
 axs[1, 0].grid()
 axs[1, 0].legend()
 axs[1, 0].set_xlabel(r"$r[a.u.]$")
@@ -233,5 +242,13 @@ axs[1, 1].plot(
 )
 axs[1, 1].grid()
 axs[1, 1].legend()
+
+axs[2, 0].semilogy(
+    time_points,
+    np.abs(1 - norm_t.real),
+    label=r"$|1-\langle \psi(t) | \psi(t) \rangle$|",
+)
+axs[2, 0].grid()
+axs[2, 0].legend()
 
 plt.show()

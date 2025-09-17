@@ -21,6 +21,7 @@ from grid_lib.spherical_coordinates.lasers import sine_square_laser, sine_laser
 from grid_lib.spherical_coordinates.utils import (
     Counter,
 )
+from grid_lib.spherical_coordinates.utils import mask_function
 
 ###########################################################################################################
 """
@@ -40,6 +41,14 @@ r_dot = GLL.r_dot[1:-1]
 w_r = GLL.weights[1:-1]
 w_r_rdot = w_r * r_dot
 n_r = len(r)
+
+# Setup mask function that absorbs the wavefunction at the grid boundary.
+mask_r = mask_function(r, r[-1], 0.8 * r[-1])
+
+plt.figure()
+plt.plot(r, mask_r)
+plt.axvline(0.8 * r_max, color="k", ls="--", label=r"$r_{mask}$")
+plt.show()
 
 l_max = 5
 n_l = l_max + 1
@@ -177,6 +186,7 @@ for i in tqdm.tqdm(range(num_steps - 1)):
     # print(f"Converged after {local_counter.counter} iterations")
     nr_its_conv[i] = local_counter.counter
     psi_t = psi_t.reshape((n_l, n_r))
+    psi_t = contract("Ik, k->Ik", psi_t, mask_r)
 
     tmp_z = contract("IJ, Ja->Ia", Z_omega, psi_t)
     expec_z[i + 1] = contract(
@@ -209,7 +219,7 @@ print(f"Max(Im(Pr)): {np.max(Pr.imag):.3e}")
 int_Pr = contract("a, a->", w_r_rdot, Pr)
 print(f"Norm of the wavefunction: {int_Pr:.12f}")
 
-fig, axs = plt.subplots(2, 2, figsize=(10, 8))
+fig, axs = plt.subplots(3, 2, figsize=(10, 8))
 axs[0, 0].plot(
     time_points, e_field_z(time_points), color="red", label=r"$E(t)$"
 )
@@ -236,5 +246,13 @@ axs[1, 1].plot(
 )
 axs[1, 1].grid()
 axs[1, 1].legend()
+
+axs[2, 0].semilogy(
+    time_points,
+    np.abs(1 - norm_t.real),
+    label=r"$|1-\langle \psi(t) | \psi(t) \rangle$|",
+)
+axs[2, 0].grid()
+axs[2, 0].legend()
 
 plt.show()
