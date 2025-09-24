@@ -1,20 +1,33 @@
 from matplotlib import pyplot as plt
 import numpy as np
 import time
-from scipy.special import erf
+from scipy.special import erf, sph_harm
 from sympy.physics.wigner import gaunt
+from scipy.sparse.linalg import LinearOperator, bicgstab
+import tqdm
+
+from opt_einsum import contract
 
 from grid_lib.pseudospectral_grids.gauss_legendre_lobatto import (
     GaussLegendreLobatto,
     Linear_map,
 )
 from grid_lib.pseudospectral_grids.femdvr import FEMDVR
+from grid_lib.spherical_coordinates.angular_matrix_elements import (
+    AngularMatrixElements,
+)
+from grid_lib.spherical_coordinates.lasers import sine_square_laser, sine_laser
+from grid_lib.spherical_coordinates.utils import (
+    Counter,
+)
+from grid_lib.spherical_coordinates.utils import mask_function
+
 
 Z = 1.0
 a = 1.997 / 2.0
 
-nodes = np.array([0, a, 2 * a, 40])  # Example nodes for testing
-n_points_pr_element = 31
+nodes = np.array([0, a, 2 * a, 15])  # Example nodes for testing
+n_points_pr_element = 16
 n_points = (
     np.ones((len(nodes) - 1,), dtype=int) * n_points_pr_element
 )  # Example number of points per element
@@ -34,6 +47,8 @@ D2 = femdvr.D2[1:-1, 1:-1]  # Exclude boundary points
 r = r[1:-1]  # Exclude boundary points
 r_dot = r_dot[1:-1]  # Exclude boundary points
 w = w[1:-1]  # Exclude boundary points
+
+mask_r = mask_function(r, r[-1], 0.8 * r[-1])
 
 ei = femdvr.edge_indices
 N = len(r) + 1
@@ -71,9 +86,11 @@ for L in range(L_max):
     r_inv_L_am[L, :] = compute_r_inv_l(r, -a, L)
 
 H = np.zeros((L_max * (N - 1), L_max * (N - 1)))
+Tl = np.zeros((L_max, N - 1, N - 1))
 for L in range(0, L_max):
     D2_L = D2 - np.diag(L * (L + 1) / r**2)
     T_L = -0.5 * D2_L
+    Tl[L] = T_L
     H[
         (L * (N - 1)) : ((L + 1) * (N - 1)), (L * (N - 1)) : ((L + 1) * (N - 1))
     ] = T_L  # -np.diag(erf(mu*r)/r)
@@ -111,8 +128,10 @@ print(f"Time setup matrix: {toc - tic:.6f} s")
 
 print(f"dim(H): {H.shape}")
 
+H += -Z * Vr_inv - Z * Vr_inv_am 
+
 tic = time.time()
-eps_H2p, C_H2p = np.linalg.eig(H - Z * Vr_inv - Z * Vr_inv_am)
+eps_H2p, C_H2p = np.linalg.eig(H)
 toc = time.time()
 print(
     f"Time for diagonalization: {toc - tic:.2f} s, Nr of radial points = {N}, L_max = {l_max}"
@@ -126,23 +145,57 @@ print(
 )
 
 E0_H2p.append(eps_H2p[0] + 1 / (2 * a))
+
 u0 = C_H2p[:, 0].reshape((L_max, N - 1))
-norm_u0 = np.sum(u0**2 * w * r_dot)
-u0 = u0 / np.sqrt(norm_u0)
+norm_u0 = 0.0
+for l in range(L_max):
+    norm_u0 += np.dot(w, u0[l, :] * u0[l, :])
+print(f"Norm of the groundstate: {norm_u0:.6f}")
 
-P0_r = np.einsum("Li,Li->i", u0.conj(), u0)
-int_P0_r = np.sum(P0_r * w * r_dot)
-print(f"int P0(r)dr: {int_P0_r:.8f}")
+u0 /= np.sqrt(norm_u0)
+psi0 = contract("li, i->li", u0, 1/r)
 
-fig, axs = plt.subplots(1, 2, figsize=(14, 10))
-for L in range(L_max):
-    axs[0].plot(r, np.abs(u0[L, :]) ** 2, label=r"$u_{%d}(r)$" % L)
-axs[0].set_xlabel("r")
-axs[0].set_ylabel("u_L(r)")
-axs[0].legend()
-axs[1].plot(r, P0_r, label=r"$P_0(r)$")
-axs[1].set_xlabel("r")
-axs[1].set_ylabel(r"$P_0(r)$")
-axs[1].legend()
-plt.tight_layout()
+P0_r = np.einsum("li,li->i", u0.conj(), u0)
+int_P0_r = np.dot(w, P0_r)
+print(f"Integral of the radial density: {int_P0_r:.6f}")
+
+fig, axs = plt.subplots(2,2, figsize=(14,10))
+axs[0, 0].plot(r, P0_r, label=f"$P_0(r)$")
+axs[0, 0].axvline(a, color="k", ls="--", label="Proton positions")
+axs[0, 0].legend()
+
+for l in range(L_max):
+    axs[0, 1].plot(r, np.abs(u0[l, :])**2, label=f"$|u_{l}(r)|^2$")
+    axs[1, 0].plot(r, np.abs(psi0[l, :])**2, label=f"$|\psi_{l}(r)|^2$")
+axs[0,1].legend()
+axs[1,0].legend()
 plt.show()
+
+from scipy.interpolate import CubicSpline
+
+theta = np.linspace(0,np.pi,21)
+theta = theta[1:-1]
+n_theta = len(theta)
+r_uniform = np.linspace(0.01, r[-1], 101)
+ul_cs = [CubicSpline(r, u0[l, :]) for l in range(L_max)]
+ul = np.array([ul_cs[l](r_uniform) for l in range(L_max)])
+
+psi_cs = np.zeros(ul.shape)
+for l in range(l_max):
+    psi_cs[l, :] = ul[l, :] / r_uniform
+
+"""
+For m=0 Y_l(theta, phi)  is independent of phi
+"""
+
+nr_uniform = len(r_uniform)
+psi = np.zeros((nr_uniform, n_theta))
+
+for l in range(l_max):
+    Y_l0 = sph_harm(0, l, 0, theta).real  # (n_theta,)
+    for k in range(nr_uniform):
+        for th in range(n_theta):
+            psi[k, th] += psi_cs[l, k] * Y_l0[th]
+
+density = psi**2
+print(np.min(density.ravel()), np.max(density.ravel()))
