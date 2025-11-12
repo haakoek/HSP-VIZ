@@ -61,7 +61,7 @@ for p in range(n_docc):
     for l in range(n_l):
         norm_Up_l = np.sum(np.abs(U_final[p, :, l])**2*w_r_rdot)
         norm_Up += norm_Up_l
-    print(f"Norm of the wavefunction at final time: {norm_Up}")
+    print(f"Norm of |phi_{p}> at final time: {norm_Up}")
 
 fig, ax = plt.subplots(2, 1, figsize=(8, 6))
 for l in range(n_l):
