@@ -63,8 +63,8 @@ m_max = l_max
 L_max = 2 * l_max
 M_max = 2 * m_max
 
-n_e = 4  # number of electron orbitals
-n_p = 4  # number of proton orbitals
+n_e = 1  # number of electron orbitals
+n_p = 1  # number of proton orbitals
 
 Nr = int(r_max * nr_ratio)
 dat = np.load(
@@ -86,9 +86,9 @@ The electron and proton densities are given by
 
 """
 
-dz = 0.2
-zmin = -6
-zmax = 6
+dz = 0.05
+zmin = -3
+zmax = 3
 x = np.arange(zmin, zmax, dz)
 y = np.arange(zmin, zmax, dz)
 z = np.arange(zmin, zmax, dz)
@@ -108,3 +108,37 @@ for p in range(n_e):
 
 print(np.linalg.norm(density_e.imag))
 print(np.linalg.norm(density_p.imag))
+
+density_e = density_e.real
+density_p = density_p.real
+
+data = density_p
+
+R = np.sqrt(X**2 + Y**2 + Z**2)
+
+from matplotlib.widgets import Slider, Button, RadioButtons
+
+fig, ax = plt.subplots()
+fig.suptitle(
+    f"Proton orbital density l_max={l_max}, m_max={m_max}, ne={n_e}, np={n_p}, slice in Y=0 plane."
+)
+plt.subplots_adjust(left=0.15, bottom=0.15)
+im = plt.imshow(
+    data[int((0 - zmin) / dz), :, :],
+    vmin=np.min(data),
+    vmax=np.max(data),
+    extent=[zmin, zmax, zmin, zmax],
+    cmap="gist_ncar",
+)
+plt.colorbar()
+sli = Slider(plt.axes([0.25, 0.025, 0.65, 0.03]), "Y", z[0], z[len(z)-1], valinit=0)
+
+
+def update(val):
+    index = int((sli.val-zmin) / dz)
+    im.set_data(data[index,:,:])
+
+
+sli.on_changed(update)
+plt.savefig(f"hd+_proton_density_slice_y0_lmax={l_max}_mmax={m_max}_ne={n_e}_np={n_p}.pdf", dpi=300)
+plt.show()
